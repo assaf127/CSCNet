@@ -46,15 +46,15 @@ class ConvLista_T(nn.Module):
 
     def _split_image(self, I):
         if self.params.stride == 1:
-            return I, torch.ones_like(I)
+            return I, torch.ones_like(I, dtype=torch.bool)
         left_pad, right_pad, top_pad, bot_pad = calc_pad_sizes(I, self.params.kernel_size, self.params.stride)
         I_batched_padded = torch.zeros(I.shape[0], self.params.stride ** 2, I.shape[1], top_pad + I.shape[2] + bot_pad,
                                        left_pad + I.shape[3] + right_pad).type_as(I)
-        valids_batched = torch.zeros_like(I_batched_padded)
+        valids_batched = torch.zeros_like(I_batched_padded, dtype=torch.bool)
         for num, (row_shift, col_shift) in enumerate([(i, j) for i in range(self.params.stride) for j in range(self.params.stride)]):
             I_padded = functional.pad(I, pad=(
             left_pad - col_shift, right_pad + col_shift, top_pad - row_shift, bot_pad + row_shift), mode='reflect')
-            valids = functional.pad(torch.ones_like(I), pad=(
+            valids = functional.pad(torch.ones_like(I, dtype=torch.bool), pad=(
             left_pad - col_shift, right_pad + col_shift, top_pad - row_shift, bot_pad + row_shift), mode='constant')
             I_batched_padded[:, num, :, :, :] = I_padded
             valids_batched[:, num, :, :, :] = valids
@@ -71,7 +71,7 @@ class ConvLista_T(nn.Module):
             r_k = self.apply_B(x_k - I_batched_padded)
             gamma_k = self.soft_threshold(gamma_k - r_k)
         output_all = self.apply_C(gamma_k)
-        output_cropped = torch.masked_select(output_all, valids_batched.byte()).reshape(I.shape[0], self.params.stride ** 2, *I.shape[1:])
+        output_cropped = torch.masked_select(output_all, valids_batched).reshape(I.shape[0], self.params.stride ** 2, *I.shape[1:])
         # if self.return_all:
         #     return output_cropped
         output = output_cropped.mean(dim=1, keepdim=False)

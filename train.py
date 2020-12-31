@@ -18,12 +18,14 @@ parser.add_argument("--lr_decay", type=float, dest="lr_decay", help="ADAM Learni
 parser.add_argument("--eps", type=float, dest="eps", help="ADAM epsilon parameter", default=1e-3)
 parser.add_argument("--unfoldings", type=int, dest="unfoldings", help="Number of LISTA unfoldings", default=12)
 parser.add_argument("--num_epochs", type=int, dest="num_epochs", help="Total number of epochs to train", default=250)
-parser.add_argument("--patch_size", type=int, dest="patch_size", help="Total number of epochs to train", default=128)
+parser.add_argument("--crop_size", type=int, dest="crop_size", help="Total number of epochs to train", default=128)
 parser.add_argument("--out_dir", type=str, dest="out_dir", help="Results' dir path", default='trained_models')
 parser.add_argument("--model_name", type=str, dest="model_name", help="The name of the model to be saved.", default=None)
 parser.add_argument("--data_path", type=str, dest="data_path", help="Path to the dir containing the training and testing datasets.", default="./datasets/")
 args = parser.parse_args()
 
+# For speed-up
+torch.backends.cudnn.benchmark = True
 
 test_path = [f'{args.data_path}/BSD68/']
 train_path = [f'{args.data_path}/CBSD432/',f'{args.data_path}/waterloo/']
@@ -35,13 +37,13 @@ eps = args.eps
 unfoldings = args.unfoldings
 lr_decay = args.lr_decay
 lr_step = args.lr_step
-patch_size = args.patch_size
+crop_size = args.crop_size
 num_epochs = args.num_epochs
 noise_std = args.noise_level / 255
 threshold = args.threshold
 
 params = ListaParams(kernel_size, num_filters, stride, unfoldings)
-loaders = dataloaders.get_dataloaders(train_path, test_path, patch_size, 1)
+loaders = dataloaders.get_dataloaders(train_path, test_path, crop_size, 1)
 model = ConvLista_T(params).cuda()
 optimizer = torch.optim.Adam(model.parameters(), lr=lr, eps=eps)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_step, gamma=lr_decay)
@@ -55,15 +57,17 @@ config_dict = {
     'kernel_size':kernel_size,
     'stride': stride,
     'num_filters': num_filters,
-    'lr':lr,
+    'lr': lr,
     'unfoldings': unfoldings,
     'lr_decay': lr_decay,
-    'patch_size': patch_size,
+    'crop_size': crop_size,
     'num_epochs': num_epochs,
     'lr_step': lr_step,
     'eps': eps,
     'threshold': threshold,
     'noise_std': noise_std,
+    'train_path': train_path,
+    'test_path': test_path,
          }
 print(config_dict)
 with open(f'{args.out_dir}/{guid}.config','w') as txt_file:
@@ -71,17 +75,16 @@ with open(f'{args.out_dir}/{guid}.config','w') as txt_file:
 
 
 print('Training model...')
-for epoch in tqdm(range(num_epochs)):
+for epoch in tqdm(range(num_epochs), position=0, leave=False):
     for phase in ['train', 'test']:
         if phase == 'train':
-            scheduler.step()
             model.train()  # Set model to training mode
         else:
             model.eval()   # Set model to evaluate mode
 
         # Iterate over data.
         num_iters = 0
-        for batch in loaders[phase]:
+        for batch in tqdm(loaders[phase], position=1, leave=False):
             batch = batch.cuda()
             noise = torch.randn_like(batch) * noise_std
             noisy_batch = batch + noise
@@ -103,8 +106,11 @@ for epoch in tqdm(range(num_epochs)):
             # statistics
             psnr[phase][epoch] += -10*np.log10(loss.item() / (batch.shape[2]*batch.shape[3]))
             num_iters += 1
+        if phase == 'train':
+            scheduler.step()
+
         psnr[phase][epoch] /= num_iters
-        print(f'{phase} PSNR: {psnr[phase][epoch]}')
+        tqdm.write(f'{epoch}: {phase} PSNR: {psnr[phase][epoch]}')
         with open(f'{args.out_dir}/{guid}_{phase}.psnr','a') as psnr_file:
             psnr_file.write(f'{psnr[phase][epoch]},')
     # deep copy the model
