@@ -6,27 +6,34 @@ from uuid import UUID
 from matplotlib import pyplot as plt
 import numpy as np
 import argparse
+import json
+
+# For speed-up
+torch.backends.cudnn.benchmark = True
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model_dir", type=str, dest="root_folder", help="The trained model's dir path", default='./trained_models')
-parser.add_argument("--model_name", type=str, dest="uuid", help="The model's name", required=True)
-parser.add_argument("--data_path", type=str, dest="data_path", help="Path to the dir containing the training and testing datasets.", default="./datasets/")
+parser.add_argument("--model-dir", type=str, dest="root_folder", help="The trained model's dir path", default='./trained_models')
+parser.add_argument("--model-name", type=str, dest="uuid", help="The model's name", required=True)
+parser.add_argument("--data-path", type=str, dest="data_path", help="Path to the dir containing the training and testing datasets.", default="./datasets/")
 args = parser.parse_args()
 
-config_filename = args.uuid+'.config'
-model_filename = args.uuid+'.model'
+config_filename = args.uuid + '_config.json'  # args.uuid+'.config'
+model_filename = args.uuid + '.model'
 config_path = join(args.root_folder, config_filename)
 
-with open(config_path) as conf_file:
-    conf = conf_file.read()
-conf = eval(conf)
+# with open(config_path) as conf_file:
+#     conf = conf_file.read()
+# conf = eval(conf)
+with open(config_path, 'r') as conf_file:
+    conf = json.load(conf_file)
+
 params = modules.ListaParams(conf['kernel_size'], conf['num_filters'], conf['stride'], conf['unfoldings'])
 model = modules.ConvLista_T(params)
 model.load_state_dict(torch.load(join(args.root_folder, model_filename)))  # cpu is good enough for testing
 
 test_path = [f'{args.data_path}/Set12/']
 # test_path = ['../../../../images/BSD68/']
-loaders = dataloaders.get_dataloaders([], test_path, 128, 1)
+loaders = dataloaders.get_dataloaders(test_path, test_path, 128, 1)
 loaders['test'].dataset.verbose = True
 model.eval()   # Set model to evaluate mode
 model.cuda()

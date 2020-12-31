@@ -5,77 +5,49 @@ import numpy as np
 from tqdm import tqdm
 import argparse
 import uuid
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--stride", type=int, dest="stride", help="stride size", default=8)
-parser.add_argument("--num_filters", type=int, dest="num_filters", help="Number of filters", default=175)
-parser.add_argument("--kernel_size", type=int, dest="kernel_size", help="The size of the kernel", default=11)
-parser.add_argument("--threshold", type=float, dest="threshold", help="Init threshold value", default=0.01)
-parser.add_argument("--noise_level", type=int, dest="noise_level", help="Should be an int in the range [0,255]", default=25)
-parser.add_argument("--lr", type=float, dest="lr", help="ADAM Learning rate", default=2e-4)
-parser.add_argument("--lr_step", type=int, dest="lr_step", help="Learning rate decrease step", default=50)
-parser.add_argument("--lr_decay", type=float, dest="lr_decay", help="ADAM Learning rate decay (on step)", default=0.35)
-parser.add_argument("--eps", type=float, dest="eps", help="ADAM epsilon parameter", default=1e-3)
-parser.add_argument("--unfoldings", type=int, dest="unfoldings", help="Number of LISTA unfoldings", default=12)
-parser.add_argument("--num_epochs", type=int, dest="num_epochs", help="Total number of epochs to train", default=250)
-parser.add_argument("--crop_size", type=int, dest="crop_size", help="Total number of epochs to train", default=128)
-parser.add_argument("--out_dir", type=str, dest="out_dir", help="Results' dir path", default='trained_models')
-parser.add_argument("--model_name", type=str, dest="model_name", help="The name of the model to be saved.", default=None)
-parser.add_argument("--data_path", type=str, dest="data_path", help="Path to the dir containing the training and testing datasets.", default="./datasets/")
-args = parser.parse_args()
+import json
 
 # For speed-up
 torch.backends.cudnn.benchmark = True
 
-test_path = [f'{args.data_path}/BSD68/']
-train_path = [f'{args.data_path}/CBSD432/',f'{args.data_path}/waterloo/']
-kernel_size = args.kernel_size
-stride = args.stride
-num_filters = args.num_filters
-lr = args.lr
-eps = args.eps
-unfoldings = args.unfoldings
-lr_decay = args.lr_decay
-lr_step = args.lr_step
-crop_size = args.crop_size
-num_epochs = args.num_epochs
-noise_std = args.noise_level / 255
-threshold = args.threshold
+parser = argparse.ArgumentParser()
+parser.add_argument("--stride", type=int, dest="stride", help="stride size", default=8)
+parser.add_argument("--num-filters", type=int, dest="num_filters", help="Number of filters", default=175)
+parser.add_argument("--kernel-size", type=int, dest="kernel_size", help="The size of the kernel", default=11)
+parser.add_argument("--threshold", type=float, dest="threshold", help="Init threshold value", default=0.01)
+parser.add_argument("--noise-level", type=int, dest="noise_level", help="Should be an int in the range [0,255]", default=25)
+parser.add_argument("--lr", type=float, dest="lr", help="ADAM Learning rate", default=2e-4)
+parser.add_argument("--lr-step", type=int, dest="lr_step", help="Learning rate decrease step", default=50)
+parser.add_argument("--lr-decay", type=float, dest="lr_decay", help="ADAM Learning rate decay (on step)", default=0.35)
+parser.add_argument("--eps", type=float, dest="eps", help="ADAM epsilon parameter", default=1e-3)
+parser.add_argument("--unfoldings", type=int, dest="unfoldings", help="Number of LISTA unfoldings", default=12)
+parser.add_argument("--num-epochs", type=int, dest="num_epochs", help="Total number of epochs to train", default=250)
+parser.add_argument("--crop-size", type=int, dest="crop_size", help="Total number of epochs to train", default=128)
+parser.add_argument("--out-dir", type=str, dest="out_dir", help="Results' dir path", default='trained_models')
+parser.add_argument("--model-name", type=str, dest="model_name", help="The name of the model to be saved.", default=None)
+parser.add_argument("--data-path", type=str, dest="data_path", help="Path to the dir containing the training and testing datasets.", default="./datasets/")
+parser.add_argument("--batch-size", type=int, dest="batch_size", help="Number of images in a batch", default=1)
+args = parser.parse_args()
 
-params = ListaParams(kernel_size, num_filters, stride, unfoldings)
-loaders = dataloaders.get_dataloaders(train_path, test_path, crop_size, 1)
+args.test_path = [f'{args.data_path}/BSD68/']
+args.train_path = [f'{args.data_path}/CBSD432/',f'{args.data_path}/waterloo/']
+args.noise_std = args.noise_level / 255
+args.guid = args.model_name if args.model_name is not None else uuid.uuid4()
+
+params = ListaParams(args.kernel_size, args.num_filters, args.stride, args.unfoldings)
+loaders = dataloaders.get_dataloaders(args.train_path, args.test_path, args.crop_size, args.batch_size)
 model = ConvLista_T(params).cuda()
-optimizer = torch.optim.Adam(model.parameters(), lr=lr, eps=eps)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_step, gamma=lr_decay)
+optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.eps)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step, gamma=args.lr_decay)
 
-psnr = {x: np.zeros(num_epochs) for x in ['train', 'test']}
+psnr = {x: np.zeros(args.num_epochs) for x in ['train', 'test']}
 
-guid = args.model_name if args.model_name is not None else uuid.uuid4()
-
-config_dict = {
-    'uuid': guid,
-    'kernel_size':kernel_size,
-    'stride': stride,
-    'num_filters': num_filters,
-    'lr': lr,
-    'unfoldings': unfoldings,
-    'lr_decay': lr_decay,
-    'crop_size': crop_size,
-    'num_epochs': num_epochs,
-    'lr_step': lr_step,
-    'eps': eps,
-    'threshold': threshold,
-    'noise_std': noise_std,
-    'train_path': train_path,
-    'test_path': test_path,
-         }
-print(config_dict)
-with open(f'{args.out_dir}/{guid}.config','w') as txt_file:
-    txt_file.write(str(config_dict))
-
+print(args.__dict__)
+with open(f'{args.out_dir}/{args.guid}_config.json','w') as json_file:
+    json.dump(args.__dict__, json_file, sort_keys=True, indent=4)
 
 print('Training model...')
-for epoch in tqdm(range(num_epochs), position=0, leave=False):
+for epoch in tqdm(range(args.num_epochs), position=0, leave=False):
     for phase in ['train', 'test']:
         if phase == 'train':
             model.train()  # Set model to training mode
@@ -86,7 +58,7 @@ for epoch in tqdm(range(num_epochs), position=0, leave=False):
         num_iters = 0
         for batch in tqdm(loaders[phase], position=1, leave=False):
             batch = batch.cuda()
-            noise = torch.randn_like(batch) * noise_std
+            noise = torch.randn_like(batch) * args.noise_std
             noisy_batch = batch + noise
 
             # zero the parameter gradients
@@ -111,7 +83,7 @@ for epoch in tqdm(range(num_epochs), position=0, leave=False):
 
         psnr[phase][epoch] /= num_iters
         tqdm.write(f'{epoch}: {phase} PSNR: {psnr[phase][epoch]}')
-        with open(f'{args.out_dir}/{guid}_{phase}.psnr','a') as psnr_file:
+        with open(f'{args.out_dir}/{args.guid}_{phase}.psnr','a') as psnr_file:
             psnr_file.write(f'{psnr[phase][epoch]},')
     # deep copy the model
-    torch.save(model.state_dict(), f'{args.out_dir}/{guid}.model')
+    torch.save(model.state_dict(), f'{args.out_dir}/{args.guid}.model')
