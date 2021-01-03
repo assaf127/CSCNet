@@ -6,6 +6,7 @@ from tqdm import tqdm
 import argparse
 import uuid
 import json
+import os
 
 # For speed-up
 torch.backends.cudnn.benchmark = True
@@ -27,6 +28,8 @@ parser.add_argument("--out-dir", type=str, dest="out_dir", help="Results' dir pa
 parser.add_argument("--model-name", type=str, dest="model_name", help="The name of the model to be saved.", default=None)
 parser.add_argument("--data-path", type=str, dest="data_path", help="Path to the dir containing the training and testing datasets.", default="./datasets/")
 parser.add_argument("--batch-size", type=int, dest="batch_size", help="Number of images in a batch", default=1)
+parser.add_argument("--scale-levels", type=int, dest="scale_levels", help="Number of scale levels to clean at", default=1)
+parser.add_argument("--num-supports", type=int, dest="num_supports", help="Number of supports to sample for training", default=64)
 args = parser.parse_args()
 
 args.test_path = [f'{args.data_path}/BSD68/']
@@ -34,7 +37,8 @@ args.train_path = [f'{args.data_path}/CBSD432/',f'{args.data_path}/waterloo/']
 args.noise_std = args.noise_level / 255
 args.guid = args.model_name if args.model_name is not None else uuid.uuid4()
 
-params = ListaParams(args.kernel_size, args.num_filters, args.stride, args.unfoldings)
+params = ListaParams(args.kernel_size, args.num_filters, args.stride, args.unfoldings,
+                     args.scale_levels, args.num_supports)
 loaders = dataloaders.get_dataloaders(args.train_path, args.test_path, args.crop_size, args.batch_size)
 model = ConvLista_T(params).cuda()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.eps)
@@ -43,7 +47,9 @@ scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step, g
 psnr = {x: np.zeros(args.num_epochs) for x in ['train', 'test']}
 
 print(args.__dict__)
-with open(f'{args.out_dir}/{args.guid}_config.json','w') as json_file:
+config_filename = f'{args.out_dir}/{args.guid}_config.json'
+os.makedirs(os.path.dirname(config_filename), exist_ok=True)
+with open(config_filename,'w') as json_file:
     json.dump(args.__dict__, json_file, sort_keys=True, indent=4)
 
 print('Training model...')
