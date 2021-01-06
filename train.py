@@ -34,7 +34,7 @@ parser.add_argument("--num-supports-eval", type=int, dest="num_supports_eval", h
 args = parser.parse_args()
 
 args.test_path = [f'{args.data_path}/BSD68/']
-args.train_path = [f'{args.data_path}/CBSD432/',f'{args.data_path}/waterloo/']
+args.train_path = [f'{args.data_path}/CBSD432/', f'{args.data_path}/waterloo/']
 args.noise_std = args.noise_level / 255
 args.guid = args.model_name if args.model_name is not None else uuid.uuid4()
 

@@ -7,6 +7,12 @@ from model.utils import conv_power_method, calc_pad_sizes
 import random
 
 
+def chunks(l, n):
+    """Yield n number of striped chunks from l."""
+    for i in range(0, n):
+        yield l[i::n]
+
+
 class SoftThreshold(nn.Module):
     def __init__(self, size, init_threshold=1e-3):
         super(SoftThreshold, self).__init__()
@@ -38,44 +44,46 @@ class ConvLista_T(nn.Module):
 
         self.params = params
 
-        self.apply_A, self.apply_B, self.apply_C = [], [], []
-        self.soft_threshold = []
-        self.downsample, self.upsample = [], []
+        apply_A, apply_B, apply_C = [], [], []
+        soft_threshold = []
+        downsample, upsample = [], []
         for i in range(self.params.scale_levels):
-            self.apply_A.append(nn.ConvTranspose2d(params.num_filters, 1, kernel_size=params.kernel_size,
+            apply_A.append(nn.ConvTranspose2d(params.num_filters, 1, kernel_size=params.kernel_size,
                                                          stride=params.stride, bias=False))
-            self.apply_B.append(nn.Conv2d(1, params.num_filters, kernel_size=params.kernel_size,
+            apply_B.append(nn.Conv2d(1, params.num_filters, kernel_size=params.kernel_size,
                                                 stride=params.stride, bias=False))
-            self.apply_C.append(nn.ConvTranspose2d(params.num_filters, 1, kernel_size=params.kernel_size,
+            apply_C.append(nn.ConvTranspose2d(params.num_filters, 1, kernel_size=params.kernel_size,
                                                          stride=params.stride, bias=False))
-            self.apply_A[i].weight.data = A
-            self.apply_B[i].weight.data = B
-            self.apply_C[i].weight.data = C
-            self.soft_threshold.append(SoftThreshold(params.num_filters, threshold))
+            apply_A[i].weight.data.copy_(A)
+            apply_B[i].weight.data.copy_(B)
+            apply_C[i].weight.data.copy_(C)
+            soft_threshold.append(SoftThreshold(params.num_filters, threshold))
             # TODO
             if i == 0:
-                self.downsample.append(nn.Identity())
-                #self.upsample.append(nn.Identity())
+                downsample.append(nn.Identity())
+                #upsample.append(nn.Identity())
             else:
-                self.downsample.append(nn.UpsamplingBilinear2d(scale_factor=1 / 2 ** i))
-                #self.upsample.append(nn.UpsamplingBilinear2d(scale_factor=2 ** i))
-        self.apply_A = nn.ModuleList(self.apply_A)
-        self.apply_B = nn.ModuleList(self.apply_B)
-        self.apply_C = nn.ModuleList(self.apply_C)
-        self.soft_threshold = nn.ModuleList(self.soft_threshold)
-        self.downsample = nn.ModuleList(self.downsample)
-        #self.upsample = nn.ModuleList(self.upsample)
+                downsample.append(nn.UpsamplingBilinear2d(scale_factor=1 / 2 ** i))
+                #upsample.append(nn.UpsamplingBilinear2d(scale_factor=2 ** i))
+        self.apply_A = nn.ModuleList(apply_A)
+        self.apply_B = nn.ModuleList(apply_B)
+        self.apply_C = nn.ModuleList(apply_C)
+        self.soft_threshold = nn.ModuleList(soft_threshold)
+        self.downsample = nn.ModuleList(downsample)
+        #self.upsample = nn.ModuleList(upsample)
 
     def _num_supports(self):
         return self.params.num_supports_train if self.training else self.params.num_supports_eval
 
-    def _sample_supports(self, seed=None):
+    def _sample_supports(self, seed=None, num_supports=None):
         if seed is not None:
             random.seed(seed)
+        if num_supports is None:
+            num_supports = self._num_supports()
         total_options = 1
         total_options = self.params.stride ** (2 * self.params.scale_levels)
-        result = random.sample(range(total_options), self._num_supports())
-        for i in range(self._num_supports()):
+        result = random.sample(range(total_options), num_supports)
+        for i in range(num_supports):
             res = []
             cur_sample = result[i]
             for level in range(self.params.scale_levels):
@@ -94,6 +102,8 @@ class ConvLista_T(nn.Module):
             else:
                 return I
 
+        num_supports = len(supports)
+
         left_pads, right_pads, top_pads, bot_pads = [], [], [], []
         for image in I:
             left_pad, right_pad, top_pad, bot_pad = calc_pad_sizes(image, self.params.kernel_size, self.params.stride)
@@ -102,15 +112,15 @@ class ConvLista_T(nn.Module):
             top_pads.append(top_pad)
             bot_pads.append(bot_pad)
 
-        I_batched_padded = [torch.zeros(I[i].shape[0] // self._num_supports(),
-                                        self._num_supports(),
+        I_batched_padded = [torch.zeros(I[i].shape[0] // num_supports,
+                                        num_supports,
                                         I[i].shape[1],
                                         top_pads[i] + I[i].shape[2] + bot_pads[i],
                                         left_pads[i] + I[i].shape[3] + right_pads[i]).type_as(I[i]) for i in range(self.params.scale_levels)]
         if get_mask:
             valids_batched = [torch.zeros_like(I_batched_padded[i], dtype=torch.bool) for i in range(self.params.scale_levels)]
 
-        reshaped_images = [I[i].reshape(I[i].shape[0] // self._num_supports(), self._num_supports(), *I[i].shape[1:]) for i in range(self.params.scale_levels)]
+        reshaped_images = [I[i].reshape(I[i].shape[0] // num_supports, num_supports, *I[i].shape[1:]) for i in range(self.params.scale_levels)]
 
         for num, support in enumerate(supports):
             for i in range(self.params.scale_levels):
@@ -133,9 +143,11 @@ class ConvLista_T(nn.Module):
         else:
             return I_batched_padded
 
-    def forward(self, I, seed=None):
-        supports = self._sample_supports(seed)
-        duplicated_image = I[:, None, :, :, :].expand(I.shape[0], self._num_supports(), *I.shape[1:])
+    def denoise(self, I, seed=None, supports=None):
+        if supports is None:
+            supports = self._sample_supports(seed)
+        num_supports = len(supports)
+        duplicated_image = I[:, None, :, :, :].expand(I.shape[0], num_supports, *I.shape[1:])
         duplicated_image = duplicated_image.reshape(-1, *I.shape[1:])
 
         scaled_images = [self.downsample[i](duplicated_image) for i in range(self.params.scale_levels)]
@@ -171,8 +183,21 @@ class ConvLista_T(nn.Module):
             else:
                 #output_cropped = output_cropped + self.upsample[i](cur_est)
                 output_cropped = output_cropped + functional.interpolate(cur_est, size=I.shape[2:], mode='bilinear', align_corners=True)
-        output_cropped = output_cropped.reshape(I.shape[0], self._num_supports(), *I.shape[1:])
+        output_cropped = output_cropped.reshape(I.shape[0], num_supports, *I.shape[1:])
         # if self.return_all:
         #     return output_cropped
         output = output_cropped.mean(dim=1, keepdim=False)
         return output
+
+    def forward(self, I, seed=None, all_supports=False):
+        if all_supports:
+            num_all_supports = self.params.stride ** (2 * self.params.scale_levels)
+            all_supports = self._sample_supports(num_supports=num_all_supports)
+            supports_list = list(chunks(all_supports, 1 + len(all_supports) // self.params.num_supports_eval))
+
+            output = self.denoise(I, seed=seed, supports=supports_list[0])
+            for i in range(1, len(supports_list)):
+                output += self.denoise(I, seed=seed, supports=supports_list[i])
+            return output / len(supports_list)
+        else:
+            return self.denoise(I, seed=seed)

@@ -36,7 +36,7 @@ class DenoisingDataset(Dataset):
         return image
 
 
-def get_dataloaders(train_path_list, test_path_list, crop_size=128, batch_size=1, only_test=False):
+def get_dataloaders(train_path_list, test_path_list, crop_size=128, batch_size=1):
     batch_sizes = {'train': batch_size, 'test': 1}
 
     train_transforms = transforms.Compose([
