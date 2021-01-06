@@ -27,7 +27,8 @@ config_path = join(args.root_folder, config_filename)
 with open(config_path, 'r') as conf_file:
     conf = json.load(conf_file)
 
-params = modules.ListaParams(conf['kernel_size'], conf['num_filters'], conf['stride'], conf['unfoldings'])
+params = modules.ListaParams(conf['kernel_size'], conf['num_filters'], conf['stride'], conf['unfoldings'],
+                             conf['noise_peak'], conf['den_eps'])
 model = modules.ConvLista_T(params)
 model.load_state_dict(torch.load(join(args.root_folder, model_filename)))  # cpu is good enough for testing
 
@@ -43,8 +44,7 @@ psnr = 0
 print(f"Testing model: {args.uuid} with noise_std {noise_std*255} on test images...")
 for batch, imagename in loaders['test']:
     batch = batch.cuda()
-    noise = torch.randn_like(batch) * noise_std
-    noisy_batch = batch + noise
+    noisy_batch = torch.poisson(batch * args.noise_peak) / args.noise_peak
 
     # forward
     # track history if only in train

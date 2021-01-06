@@ -6,6 +6,11 @@ from tqdm import tqdm
 import argparse
 import uuid
 import json
+import os
+import random
+
+random.seed(0)
+torch.manual_seed(0)
 
 # For speed-up
 torch.backends.cudnn.benchmark = True
@@ -15,7 +20,7 @@ parser.add_argument("--stride", type=int, dest="stride", help="stride size", def
 parser.add_argument("--num-filters", type=int, dest="num_filters", help="Number of filters", default=175)
 parser.add_argument("--kernel-size", type=int, dest="kernel_size", help="The size of the kernel", default=11)
 parser.add_argument("--threshold", type=float, dest="threshold", help="Init threshold value", default=0.01)
-parser.add_argument("--noise-level", type=int, dest="noise_level", help="Should be an int in the range [0,255]", default=25)
+parser.add_argument("--noise-peak", type=float, dest="noise_peak", help="Should be a positive float, peak for poisson noise", default=2.0)
 parser.add_argument("--lr", type=float, dest="lr", help="ADAM Learning rate", default=2e-4)
 parser.add_argument("--lr-step", type=int, dest="lr_step", help="Learning rate decrease step", default=50)
 parser.add_argument("--lr-decay", type=float, dest="lr_decay", help="ADAM Learning rate decay (on step)", default=0.35)
@@ -27,14 +32,14 @@ parser.add_argument("--out-dir", type=str, dest="out_dir", help="Results' dir pa
 parser.add_argument("--model-name", type=str, dest="model_name", help="The name of the model to be saved.", default=None)
 parser.add_argument("--data-path", type=str, dest="data_path", help="Path to the dir containing the training and testing datasets.", default="./datasets/")
 parser.add_argument("--batch-size", type=int, dest="batch_size", help="Number of images in a batch", default=1)
+parser.add_argument("--den-eps", type=float, dest="den_eps", help="Denominator to ensure non-zero denominator in the gradient", default=1e-4)
 args = parser.parse_args()
 
 args.test_path = [f'{args.data_path}/BSD68/']
 args.train_path = [f'{args.data_path}/CBSD432/',f'{args.data_path}/waterloo/']
-args.noise_std = args.noise_level / 255
 args.guid = args.model_name if args.model_name is not None else uuid.uuid4()
 
-params = ListaParams(args.kernel_size, args.num_filters, args.stride, args.unfoldings)
+params = ListaParams(args.kernel_size, args.num_filters, args.stride, args.unfoldings, args.noise_peak, args.den_eps)
 loaders = dataloaders.get_dataloaders(args.train_path, args.test_path, args.crop_size, args.batch_size)
 model = ConvLista_T(params).cuda()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.eps)
@@ -43,7 +48,9 @@ scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step, g
 psnr = {x: np.zeros(args.num_epochs) for x in ['train', 'test']}
 
 print(args.__dict__)
-with open(f'{args.out_dir}/{args.guid}_config.json','w') as json_file:
+config_filename = f'{args.out_dir}/{args.guid}_config.json'
+os.makedirs(os.path.dirname(config_filename), exist_ok=True)
+with open(config_filename,'w') as json_file:
     json.dump(args.__dict__, json_file, sort_keys=True, indent=4)
 
 print('Training model...')
@@ -58,8 +65,7 @@ for epoch in tqdm(range(args.num_epochs), position=0, leave=False):
         num_iters = 0
         for batch in tqdm(loaders[phase], position=1, leave=False):
             batch = batch.cuda()
-            noise = torch.randn_like(batch) * args.noise_std
-            noisy_batch = batch + noise
+            noisy_batch = torch.poisson(batch * args.noise_peak) / args.noise_peak
 
             # zero the parameter gradients
             optimizer.zero_grad()
@@ -73,6 +79,7 @@ for epoch in tqdm(range(args.num_epochs), position=0, leave=False):
                 # backward + optimize only if in training phase
                 if phase == 'train':
                     loss.backward()
+                    torch.nn.utils.clip_grad_value_(model.parameters(), 1e6)
                     optimizer.step()
 
             # statistics

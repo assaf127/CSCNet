@@ -19,7 +19,7 @@ class SoftThreshold(nn.Module):
         return out
 
 
-ListaParams = namedtuple('ListaParams', ['kernel_size', 'num_filters', 'stride', 'unfoldings'])
+ListaParams = namedtuple('ListaParams', ['kernel_size', 'num_filters', 'stride', 'unfoldings', 'noise_peak', 'den_eps'])
 
 
 class ConvLista_T(nn.Module):
@@ -63,16 +63,18 @@ class ConvLista_T(nn.Module):
         return I_batched_padded, valids_batched
 
     def forward(self, I):
+        I = I * self.params.noise_peak
         I_batched_padded, valids_batched = self._split_image(I)
         conv_input = self.apply_B(I_batched_padded)
         gamma_k = self.soft_threshold(conv_input)
         for k in range(self.params.unfoldings - 1):
             x_k = self.apply_A(gamma_k)
-            r_k = self.apply_B(x_k - I_batched_padded)
+            x_k[torch.abs(x_k) < self.params.den_eps] = self.params.den_eps  # Ensure positive denominator
+            r_k = self.apply_B(1.0 - I_batched_padded / x_k)
             gamma_k = self.soft_threshold(gamma_k - r_k)
         output_all = self.apply_C(gamma_k)
         output_cropped = torch.masked_select(output_all, valids_batched).reshape(I.shape[0], self.params.stride ** 2, *I.shape[1:])
         # if self.return_all:
         #     return output_cropped
-        output = output_cropped.mean(dim=1, keepdim=False)
+        output = output_cropped.mean(dim=1, keepdim=False) / self.params.noise_peak
         return output
