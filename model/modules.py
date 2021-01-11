@@ -34,13 +34,16 @@ class ConvLista_T(nn.Module):
     def __init__(self, params: ListaParams, A=None, B=None, C=None, threshold=1e-2):
         super(ConvLista_T, self).__init__()
         if A is None:
-            A = torch.randn(params.num_filters, 1, params.kernel_size, params.kernel_size)
-            l = conv_power_method(A, [512, 512], num_iters=200, stride=params.stride)
-            A /= torch.sqrt(l)
+            A = []
+            for i in range(params.scale_levels):
+                cur_A = torch.randn(params.num_filters[i], 1, params.kernel_size, params.kernel_size)
+                l = conv_power_method(cur_A, [512, 512], num_iters=200, stride=params.stride)
+                cur_A /= torch.sqrt(l)
+                A.append(cur_A)
         if B is None:
-            B = torch.clone(A)
+            B = [torch.clone(A[i]) for i in range(params.scale_levels)]
         if C is None:
-            C = torch.clone(A)
+            C = [torch.clone(A[i]) for i in range(params.scale_levels)]
 
         self.params = params
 
@@ -48,16 +51,16 @@ class ConvLista_T(nn.Module):
         soft_threshold = []
         downsample, upsample = [], []
         for i in range(self.params.scale_levels):
-            apply_A.append(nn.ConvTranspose2d(params.num_filters, 1, kernel_size=params.kernel_size,
+            apply_A.append(nn.ConvTranspose2d(params.num_filters[i], 1, kernel_size=params.kernel_size,
                                                          stride=params.stride, bias=False))
-            apply_B.append(nn.Conv2d(1, params.num_filters, kernel_size=params.kernel_size,
+            apply_B.append(nn.Conv2d(1, params.num_filters[i], kernel_size=params.kernel_size,
                                                 stride=params.stride, bias=False))
-            apply_C.append(nn.ConvTranspose2d(params.num_filters, 1, kernel_size=params.kernel_size,
+            apply_C.append(nn.ConvTranspose2d(params.num_filters[i], 1, kernel_size=params.kernel_size,
                                                          stride=params.stride, bias=False))
-            apply_A[i].weight.data.copy_(A)
-            apply_B[i].weight.data.copy_(B)
-            apply_C[i].weight.data.copy_(C)
-            soft_threshold.append(SoftThreshold(params.num_filters, threshold))
+            apply_A[i].weight.data.copy_(A[i])
+            apply_B[i].weight.data.copy_(B[i])
+            apply_C[i].weight.data.copy_(C[i])
+            soft_threshold.append(SoftThreshold(params.num_filters[i], threshold))
             # TODO
             if i == 0:
                 downsample.append(nn.Identity())
