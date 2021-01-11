@@ -29,6 +29,8 @@ parser.add_argument("--model-name", type=str, dest="model_name", help="The name 
 parser.add_argument("--data-path", type=str, dest="data_path", help="Path to the dir containing the training and testing datasets.", default="./datasets/")
 parser.add_argument("--batch-size", type=int, dest="batch_size", help="Number of images in a batch", default=1)
 parser.add_argument("--scale-levels", type=int, dest="scale_levels", help="Number of scale levels to clean at", default=2)
+parser.add_argument("--scale-factor", type=int, dest="scale_factor", help="The scale factor to use for down/up sampling", default=2)
+parser.add_argument("--sampling-kernel-size", type=int, dest="sampling_kernel_size", help="The size of the sampling kernel in the down/up sampling", default=5)
 parser.add_argument("--num-supports-train", type=int, dest="num_supports_train", help="Number of supports to sample for training", default=100)
 parser.add_argument("--num-supports-eval", type=int, dest="num_supports_eval", help="Number of supports to sample for testing", default=100)
 args = parser.parse_args()
@@ -39,7 +41,8 @@ args.noise_std = args.noise_level / 255
 args.guid = args.model_name if args.model_name is not None else uuid.uuid4()
 
 params = ListaParams(args.kernel_size, args.num_filters, args.stride, args.unfoldings,
-                     args.scale_levels, args.num_supports_train, args.num_supports_eval)
+                     args.scale_levels, args.scale_factor, args.sampling_kernel_size, args.num_supports_train,
+                     args.num_supports_eval)
 loaders = dataloaders.get_dataloaders(args.train_path, args.test_path, args.crop_size, args.batch_size)
 model = ConvLista_T(params).cuda()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=args.eps)

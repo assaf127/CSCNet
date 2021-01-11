@@ -26,8 +26,16 @@ class SoftThreshold(nn.Module):
         return out
 
 
+class Identity(nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+
+    def forward(self, x, *arg, **kwargs):
+        return x
+
+
 ListaParams = namedtuple('ListaParams', ['kernel_size', 'num_filters', 'stride', 'unfoldings', 'scale_levels',
-                                         'num_supports_train', 'num_supports_eval'])
+                                         'scale_factor', 'sampling_kernel_size', 'num_supports_train', 'num_supports_eval'])
 
 
 class ConvLista_T(nn.Module):
@@ -63,17 +71,19 @@ class ConvLista_T(nn.Module):
             soft_threshold.append(SoftThreshold(params.num_filters[i], threshold))
             # TODO
             if i == 0:
-                downsample.append(nn.Identity())
-                #upsample.append(nn.Identity())
+                downsample.append(Identity())
+                upsample.append(Identity())
             else:
-                downsample.append(nn.UpsamplingBilinear2d(scale_factor=1 / 2 ** i))
-                #upsample.append(nn.UpsamplingBilinear2d(scale_factor=2 ** i))
+                downsample.append(nn.Conv2d(1, 1, params.sampling_kernel_size, stride=params.scale_factor,
+                                            padding=params.sampling_kernel_size // 2, bias=False))
+                upsample.append(nn.ConvTranspose2d(1, 1, params.sampling_kernel_size, stride=params.scale_factor,
+                                                   padding=params.sampling_kernel_size // 2, bias=False))
         self.apply_A = nn.ModuleList(apply_A)
         self.apply_B = nn.ModuleList(apply_B)
         self.apply_C = nn.ModuleList(apply_C)
         self.soft_threshold = nn.ModuleList(soft_threshold)
         self.downsample = nn.ModuleList(downsample)
-        #self.upsample = nn.ModuleList(upsample)
+        self.upsample = nn.ModuleList(upsample)
 
     def _num_supports(self):
         return self.params.num_supports_train if self.training else self.params.num_supports_eval
@@ -166,7 +176,7 @@ class ConvLista_T(nn.Module):
                 cur_est = torch.masked_select(self.apply_A[i](gamma_k[i]), valids_batched[i])
                 cur_est = cur_est.reshape(-1, *scaled_images_shapes[i])
                 #cur_est = self.upsample[i](cur_est)
-                cur_est = functional.interpolate(cur_est, size=I.shape[2:], mode='bilinear', align_corners=True)
+                cur_est = self.upsample[i](cur_est, output_size=duplicated_image.size())
                 r_k = r_k - cur_est
             # Get residual coherences
             scaled_images = [self.downsample[i](r_k) for i in range(self.params.scale_levels)]
@@ -181,11 +191,9 @@ class ConvLista_T(nn.Module):
             cur_est = torch.masked_select(output_all[i], valids_batched[i])
             cur_est = cur_est.reshape(-1, *scaled_images_shapes[i])
             if i==0:
-                #output_cropped = self.upsample[i](cur_est)
-                output_cropped = functional.interpolate(cur_est, size=I.shape[2:], mode='bilinear', align_corners=True)
+                output_cropped = self.upsample[i](cur_est, output_size=duplicated_image.size())
             else:
-                #output_cropped = output_cropped + self.upsample[i](cur_est)
-                output_cropped = output_cropped + functional.interpolate(cur_est, size=I.shape[2:], mode='bilinear', align_corners=True)
+                output_cropped = output_cropped + self.upsample[i](cur_est, output_size=duplicated_image.size())
         output_cropped = output_cropped.reshape(I.shape[0], num_supports, *I.shape[1:])
         # if self.return_all:
         #     return output_cropped
