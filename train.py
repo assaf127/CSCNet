@@ -13,7 +13,7 @@ torch.backends.cudnn.benchmark = True
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--stride", type=int, dest="stride", help="stride size", default=8)
-parser.add_argument("--num-filters", type=int, dest="num_filters", nargs="+", help="Number of filters", default=[90, 90])
+parser.add_argument("--num-filters", type=int, dest="num_filters", nargs="+", help="Number of filters", default=[175, 90])
 parser.add_argument("--kernel-size", type=int, dest="kernel_size", help="The size of the kernel", default=11)
 parser.add_argument("--threshold", type=float, dest="threshold", help="Init threshold value", default=0.01)
 parser.add_argument("--noise-level", type=int, dest="noise_level", help="Should be an int in the range [0,255]", default=25)

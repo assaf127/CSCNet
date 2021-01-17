@@ -37,12 +37,13 @@ with open(config_path, 'r') as conf_file:
     conf = json.load(conf_file)
 
 params = modules.ListaParams(conf['kernel_size'], conf['num_filters'], conf['stride'], conf['unfoldings'],
-                             conf['scale_levels'], conf['num_supports_train'], conf['num_supports_eval'])
+                             conf['scale_levels'], conf['scale_factor'], conf['sampling_kernel_size'],
+                             conf['num_supports_train'], conf['num_supports_eval'])
 model = modules.ConvLista_T(params)
 model.load_state_dict(torch.load(join(args.root_folder, model_filename)))
 
-test_path = [f'{args.data_path}/Set12/']
-# test_path = [f'{args.data_path}/BSD68/']
+# test_path = [f'{args.data_path}/Set12/']
+test_path = [f'{args.data_path}/BSD68/']
 loaders = dataloaders.get_dataloaders(test_path, test_path, 128, 1)
 loaders['test'].dataset.verbose = True
 model.eval()   # Set model to evaluate mode
